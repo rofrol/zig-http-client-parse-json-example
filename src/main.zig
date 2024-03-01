@@ -12,29 +12,31 @@ const Data = struct {
 };
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
-    const uri = std.Uri.parse("https://uselessfacts.jsph.pl/api/v2/facts/random") catch unreachable;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     var client = std.http.Client{ .allocator = allocator };
-    var headers = std.http.Headers{ .allocator = allocator };
-    defer headers.deinit();
+    defer client.deinit();
 
-    try headers.append("accept", "*/*");
-    var req = try client.request(.GET, uri, headers, .{});
+    const endpoint = "https://uselessfacts.jsph.pl/api/v2/facts/random";
+    const uri = try std.Uri.parse(endpoint);
+
+    const headers = std.http.Client.Request.Headers{
+        .content_type = std.http.Client.Request.Headers.Value{
+            .override = "application/json",
+        },
+    };
+
+    const server_header_buffer: []u8 = try allocator.alloc(u8, 8 * 1024 * 4);
+
+    var req = try client.open(.GET, uri, std.http.Client.RequestOptions{
+        .server_header_buffer = server_header_buffer,
+        .headers = headers,
+    });
     defer req.deinit();
 
-    try req.start();
+    try req.send(.{});
     try req.wait();
-
-    // const body = try req.reader().readAllAlloc(allocator, 1024);
-    // defer allocator.free(body);
-    //
-    // const stdout_file = std.io.getStdOut().writer();
-    // var bw = std.io.bufferedWriter(stdout_file);
-    // const stdout = bw.writer();
-    //
-    // try stdout.print("{s}", .{body});
-    //
-    // try bw.flush(); // don't forget to flush!
 
     const json_str = try req.reader().readAllAlloc(allocator, std.math.maxInt(usize));
     defer allocator.free(json_str);
